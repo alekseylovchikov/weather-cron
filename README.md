@@ -20,3 +20,7 @@ curl "http://localhost:3000/api/cron?dry=1"
 
 ## Schedule
 Cron is configured in `vercel.json`.
+
+## Dust status
+Dust danger is evaluated by EAQI thresholds on daily average PM2.5/PM10.
+Status is `опасно` when the worst category is `Плохо` or worse.
