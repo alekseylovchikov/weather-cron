@@ -1,0 +1,23 @@
+{
+  "name": "my-weather",
+  "version": "1.0.0",
+  "description": "Simple Vercel Cron → serverless API → Telegram message.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alekseylovchikov/weather-cron.git"
+  },
+  "author": "aleksei lovchikov",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/alekseylovchikov/weather-cron/issues"
+  },
+  "homepage": "https://github.com/alekseylovchikov/weather-cron#readme",
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1"
+  }
+}
