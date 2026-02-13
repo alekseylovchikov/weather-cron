@@ -74,7 +74,7 @@ async function fetchJson(url) {
   return res.json();
 }
 
-async function getWeather() {
+async function getWeather(dayOffset = 0) {
   const url = new URL("https://api.open-meteo.com/v1/forecast");
   url.searchParams.set("latitude", LATITUDE.toString());
   url.searchParams.set("longitude", LONGITUDE.toString());
@@ -87,7 +87,7 @@ async function getWeather() {
       "wind_speed_10m_max",
     ].join(",")
   );
-  url.searchParams.set("forecast_days", "1");
+  url.searchParams.set("forecast_days", String(dayOffset + 1));
   url.searchParams.set("timezone", TIMEZONE);
   url.searchParams.set("wind_speed_unit", "ms");
   url.searchParams.set("temperature_unit", "celsius");
@@ -97,29 +97,35 @@ async function getWeather() {
   const daily = data?.daily || {};
 
   return {
-    date: daily.time?.[0],
-    tempMax: daily.temperature_2m_max?.[0],
-    tempMin: daily.temperature_2m_min?.[0],
-    precip: daily.precipitation_sum?.[0],
-    windMax: daily.wind_speed_10m_max?.[0],
+    date: daily.time?.[dayOffset],
+    tempMax: daily.temperature_2m_max?.[dayOffset],
+    tempMin: daily.temperature_2m_min?.[dayOffset],
+    precip: daily.precipitation_sum?.[dayOffset],
+    windMax: daily.wind_speed_10m_max?.[dayOffset],
   };
 }
 
-async function getAirQuality() {
+async function getAirQuality(dayOffset = 0) {
   const url = new URL("https://air-quality-api.open-meteo.com/v1/air-quality");
   url.searchParams.set("latitude", LATITUDE.toString());
   url.searchParams.set("longitude", LONGITUDE.toString());
   url.searchParams.set("hourly", "pm10,pm2_5");
-  url.searchParams.set("forecast_days", "1");
+  url.searchParams.set("forecast_days", String(dayOffset + 1));
   url.searchParams.set("timezone", TIMEZONE);
 
   const data = await fetchJson(url.toString());
   const hourly = data?.hourly || {};
 
-  const pm10Avg = average(hourly.pm10);
-  const pm10Max = maximum(hourly.pm10);
-  const pm25Avg = average(hourly.pm2_5);
-  const pm25Max = maximum(hourly.pm2_5);
+  const startIdx = dayOffset * 24;
+  const endIdx = startIdx + 24;
+
+  const pm10Slice = (hourly.pm10 || []).slice(startIdx, endIdx);
+  const pm25Slice = (hourly.pm2_5 || []).slice(startIdx, endIdx);
+
+  const pm10Avg = average(pm10Slice);
+  const pm10Max = maximum(pm10Slice);
+  const pm25Avg = average(pm25Slice);
+  const pm25Max = maximum(pm25Slice);
 
   return { pm10Avg, pm10Max, pm25Avg, pm25Max };
 }
@@ -142,8 +148,10 @@ async function sendTelegramMessage(text) {
   }
 }
 
-function buildMessage({ weather, air }) {
-  const dateLabel = formatDate(weather.date) || "сегодня";
+function buildMessage({ weather, air, isTomorrow }) {
+  const dateFormatted = formatDate(weather.date);
+  const dayWord = isTomorrow ? "завтра" : "сегодня";
+  const dateLabel = dateFormatted ? `${dayWord}, ${dateFormatted}` : dayWord;
   const lines = [`📍 ${LOCATION_NAME} — погода на ${dateLabel} (прогноз)`];
 
   const tempMin = formatNumber(weather.tempMin);
@@ -208,6 +216,8 @@ module.exports = async (req, res) => {
   }
 
   const dryRun = req.query?.dry === "1" || req.query?.dry === "true";
+  const dayParam = req.query?.day || "today";
+  const dayOffset = dayParam === "tomorrow" ? 1 : 0;
 
   if (!dryRun && (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID)) {
     res.status(500).json({
@@ -217,8 +227,11 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const [weather, air] = await Promise.all([getWeather(), getAirQuality()]);
-    const message = buildMessage({ weather, air });
+    const [weather, air] = await Promise.all([
+      getWeather(dayOffset),
+      getAirQuality(dayOffset),
+    ]);
+    const message = buildMessage({ weather, air, isTomorrow: dayOffset === 1 });
 
     if (!dryRun) {
       await sendTelegramMessage(message);
