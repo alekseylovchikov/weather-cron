@@ -131,6 +131,61 @@ async function getAirQuality(dayOffset = 0) {
   return { pm10Avg, pm10Max, pm25Avg, pm25Max };
 }
 
+async function translateTextsToRussian(texts) {
+  if (!Array.isArray(texts) || texts.length === 0) {
+    return texts;
+  }
+
+  const body = {
+    q: texts,
+    source: "en",
+    target: "ru",
+    format: "text",
+  };
+
+  try {
+    const res = await fetch("https://libretranslate.com/translate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(
+        "LibreTranslate error:",
+        res.status,
+        res.statusText,
+        "-",
+        errorText.slice(0, 200)
+      );
+      return texts;
+    }
+
+    const data = await res.json();
+    const translationsArray = Array.isArray(data) ? data : data.translations;
+    const translations = Array.isArray(translationsArray)
+      ? translationsArray
+      : [];
+
+    return texts.map((t, idx) => {
+      const translated =
+        translations[idx]?.translatedText || translations[idx]?.text;
+      return typeof translated === "string" && translated.trim()
+        ? translated
+        : t;
+    });
+  } catch (error) {
+    console.error(
+      "Failed to translate with LibreTranslate:",
+      error instanceof Error ? error.message : error
+    );
+    return texts;
+  }
+}
+
 async function getCyprusNews(limit = 3) {
   if (!WORLD_NEWS_API_KEY) {
     return null;
@@ -164,6 +219,13 @@ async function getCyprusNews(limit = 3) {
     if (!unique.length) {
       return null;
     }
+
+    const originalTitles = unique.map((item) => item.title);
+    const translatedTitles = await translateTextsToRussian(originalTitles);
+
+    translatedTitles.forEach((t, idx) => {
+      unique[idx].title = t;
+    });
 
     return unique;
   } catch (error) {
