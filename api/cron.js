@@ -5,6 +5,7 @@ const TIMEZONE = process.env.TIMEZONE || "auto";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const WORLD_NEWS_API_KEY = process.env.WORLD_NEWS_API_KEY;
 
 const NF_1 = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
 
@@ -130,6 +131,50 @@ async function getAirQuality(dayOffset = 0) {
   return { pm10Avg, pm10Max, pm25Avg, pm25Max };
 }
 
+async function getCyprusNews(limit = 3) {
+  if (!WORLD_NEWS_API_KEY) {
+    return null;
+  }
+
+  const url = new URL("https://api.worldnewsapi.com/top-news");
+  url.searchParams.set("source-country", "cy");
+  url.searchParams.set("language", "en");
+  url.searchParams.set("api-key", WORLD_NEWS_API_KEY);
+
+  try {
+    const data = await fetchJson(url.toString());
+    const clusters = Array.isArray(data?.top_news) ? data.top_news : [];
+    const allNews = clusters.flatMap((cluster) =>
+      Array.isArray(cluster?.news) ? cluster.news : []
+    );
+
+    const unique = [];
+    const seenTitles = new Set();
+    for (const item of allNews) {
+      const title = typeof item?.title === "string" ? item.title.trim() : "";
+      if (!title || seenTitles.has(title)) continue;
+      seenTitles.add(title);
+      unique.push({
+        title,
+        url: typeof item?.url === "string" ? item.url : null,
+      });
+      if (unique.length >= limit) break;
+    }
+
+    if (!unique.length) {
+      return null;
+    }
+
+    return unique;
+  } catch (error) {
+    console.error(
+      "Failed to fetch Cyprus news:",
+      error instanceof Error ? error.message : error
+    );
+    return null;
+  }
+}
+
 async function sendTelegramMessage(text) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
   const res = await fetch(url, {
@@ -148,7 +193,7 @@ async function sendTelegramMessage(text) {
   }
 }
 
-function buildMessage({ weather, air, isTomorrow }) {
+function buildMessage({ weather, air, news, isTomorrow }) {
   const dateFormatted = formatDate(weather.date);
   const dayWord = isTomorrow ? "завтра" : "сегодня";
   const dateLabel = dateFormatted ? `${dayWord}, ${dateFormatted}` : dayWord;
@@ -201,6 +246,20 @@ function buildMessage({ weather, air, isTomorrow }) {
     }
   }
 
+  if (Array.isArray(news) && news.length > 0) {
+    lines.push("");
+    lines.push("📰 Краткая новостная сводка по Кипру:");
+    news.forEach((item, index) => {
+      const title = item?.title;
+      const url = item?.url;
+      if (title && url) {
+        lines.push(`${index + 1}. ${title} — ${url}`);
+      } else if (title) {
+        lines.push(`${index + 1}. ${title}`);
+      }
+    });
+  }
+
   return lines.join("\n");
 }
 
@@ -227,11 +286,17 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const [weather, air] = await Promise.all([
+    const [weather, air, news] = await Promise.all([
       getWeather(dayOffset),
       getAirQuality(dayOffset),
+      getCyprusNews(),
     ]);
-    const message = buildMessage({ weather, air, isTomorrow: dayOffset === 1 });
+    const message = buildMessage({
+      weather,
+      air,
+      news,
+      isTomorrow: dayOffset === 1,
+    });
 
     if (!dryRun) {
       await sendTelegramMessage(message);
