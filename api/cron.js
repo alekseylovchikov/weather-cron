@@ -240,6 +240,46 @@ async function sendTelegramMessage(text) {
   }
 }
 
+function temperatureIcon(tempMax, tempMin) {
+  const t = Number.isFinite(tempMax) ? tempMax : tempMin;
+  if (!Number.isFinite(t)) return "🌡️";
+  if (t >= 35) return "🥵";
+  if (t >= 28) return "☀️";
+  if (t >= 18) return "🌤️";
+  if (t >= 8) return "🌥️";
+  if (t >= 0) return "🧥";
+  return "🥶";
+}
+
+function precipitationIcon(mm) {
+  if (!Number.isFinite(mm) || mm <= 0) return "☀️";
+  if (mm < 1) return "🌦️";
+  if (mm < 5) return "🌧️";
+  if (mm < 15) return "☔";
+  return "⛈️";
+}
+
+function windIcon(ms) {
+  if (!Number.isFinite(ms)) return "💨";
+  if (ms < 3) return "🍃";
+  if (ms < 8) return "💨";
+  if (ms < 14) return "🌬️";
+  return "🌪️";
+}
+
+// EAQI level index: 1 Хорошо, 2 Удовл., 3 Умеренно, 4 Плохо, 5 Очень плохо, 6 Крайне плохо
+function dustIcon(level) {
+  if (!level) return "🌫️";
+  switch (level.index) {
+    case 1: return "🟢";
+    case 2: return "🟡";
+    case 3: return "🟠";
+    case 4: return "🔴";
+    case 5: return "🟣";
+    default: return "⚫";
+  }
+}
+
 function buildMessage({ weather, air, news, isTomorrow }) {
   const dateFormatted = formatDate(weather.date);
   const dayWord = isTomorrow ? "завтра" : "сегодня";
@@ -249,17 +289,20 @@ function buildMessage({ weather, air, news, isTomorrow }) {
   const tempMin = formatNumber(weather.tempMin);
   const tempMax = formatNumber(weather.tempMax);
   if (tempMin && tempMax) {
-    lines.push(`🌡️ Температура: ${tempMin}…${tempMax} °C`);
+    const icon = temperatureIcon(weather.tempMax, weather.tempMin);
+    lines.push(`${icon} Температура: ${tempMin}…${tempMax} °C`);
   }
 
   const precip = formatNumber(weather.precip);
   if (precip) {
-    lines.push(`🌧️ Осадки: ${precip} мм`);
+    const icon = precipitationIcon(weather.precip);
+    lines.push(`${icon} Осадки: ${precip} мм`);
   }
 
   const windMax = formatNumber(weather.windMax);
   if (windMax) {
-    lines.push(`💨 Ветер: до ${windMax} м/с`);
+    const icon = windIcon(weather.windMax);
+    lines.push(`${icon} Ветер: до ${windMax} м/с`);
   }
 
   if (air) {
@@ -270,8 +313,9 @@ function buildMessage({ weather, air, news, isTomorrow }) {
     const pm10Max = formatNumber(air.pm10Max);
     if (pm10Avg && pm10Max) {
       const suffix = pm10Level ? ` — ${pm10Level.label}` : "";
+      const icon = dustIcon(pm10Level);
       lines.push(
-        `🌫️ Пыль (PM10): ср. ${pm10Avg} мкг/м³, макс. ${pm10Max} мкг/м³${suffix}`
+        `${icon} Пыль (PM10): ср. ${pm10Avg} мкг/м³, макс. ${pm10Max} мкг/м³${suffix}`
       );
     }
 
@@ -279,8 +323,9 @@ function buildMessage({ weather, air, news, isTomorrow }) {
     const pm25Max = formatNumber(air.pm25Max);
     if (pm25Avg && pm25Max) {
       const suffix = pm25Level ? ` — ${pm25Level.label}` : "";
+      const icon = dustIcon(pm25Level);
       lines.push(
-        `🌫️ Пыль (PM2.5): ср. ${pm25Avg} мкг/м³, макс. ${pm25Max} мкг/м³${suffix}`
+        `${icon} Пыль (PM2.5): ср. ${pm25Avg} мкг/м³, макс. ${pm25Max} мкг/м³${suffix}`
       );
     }
 
