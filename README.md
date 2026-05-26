@@ -1,26 +1,70 @@
 # Limassol Weather Bot (Vercel)
 
-Simple Vercel Cron → serverless API → Telegram message.
+Vercel Cron → serverless API → сообщение в Telegram с прогнозом погоды, качеством воздуха и сводкой главных новостей на русском.
 
-## Env vars
+## Что отправляется
+
+- 📍 Локация и дата прогноза (сегодня/завтра)
+- Температура, осадки, ветер (Open‑Meteo) — иконка меняется по значению
+- Качество воздуха: PM10 и PM2.5, средние и максимумы за сутки (Open‑Meteo Air Quality)
+- Итоговая оценка пыли по EAQI: ✅ не опасно / ⚠️ опасно
+- 📰 Топ‑5 главных мировых новостей на русском (RSS: Lenta, RIA, RBC, Meduza), агрегация по свежести с дедупликацией
+
+### Иконки по статусу
+
+- Температура: 🥶 <0° · 🧥 0–8° · 🌥️ 8–18° · 🌤️ 18–28° · ☀️ 28–35° · 🥵 ≥35°
+- Осадки: ☀️ 0 · 🌦️ <1 мм · 🌧️ 1–5 · ☔ 5–15 · ⛈️ ≥15
+- Ветер: 🍃 <3 м/с · 💨 3–8 · 🌬️ 8–14 · 🌪️ ≥14
+- Пыль (EAQI): 🟢 Хорошо · 🟡 Удовл. · 🟠 Умеренно · 🔴 Плохо · 🟣 Очень плохо · ⚫ Крайне плохо
+- Оценка пыли: ✅ не опасно / ⚠️ опасно (когда худшая категория ≥ «Плохо»)
+
+## Переменные окружения
+
+Обязательные:
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 
-Optional:
-- `LOCATION_NAME` (default `Лимассол`)
-- `LATITUDE` / `LONGITUDE`
-- `TIMEZONE` (default `auto`)
+Необязательные:
+- `LOCATION_NAME` (по умолчанию `Лимассол`)
+- `LATITUDE` / `LONGITUDE` (по умолчанию координаты Лимассола)
+- `TIMEZONE` (по умолчанию `auto`)
 
-## Test
-Call the endpoint with dry run (no Telegram send):
+Ключи для новостей не нужны — используются публичные RSS‑ленты.
+
+## Локальный запуск
+
+```bash
+npm install
+npm run dev
+```
+
+Тестовый вызов без отправки в Telegram:
 
 ```bash
 curl "http://localhost:3000/api/cron?dry=1"
+curl "http://localhost:3000/api/cron?dry=1&day=tomorrow"
 ```
 
-## Schedule
-Cron is configured in `vercel.json`.
+В ответе придёт JSON `{ ok, message, dryRun }` — в `message` готовый текст для канала.
 
-## Dust status
-Dust danger is evaluated by EAQI thresholds on daily average PM2.5/PM10.
-Status is `опасно` when the worst category is `Плохо` or worse.
+## Параметры запроса
+
+- `day=today` (по умолчанию) или `day=tomorrow`
+- `dry=1` — не отправлять в Telegram, только вернуть текст в ответе
+
+## Расписание
+
+Cron настраивается в [vercel.json](vercel.json):
+
+- `0 3 * * *` — `?day=today`
+- `0 13 * * *` — `?day=tomorrow`
+
+## Деплой
+
+Подключите репозиторий к Vercel, добавьте переменные окружения и задеплойте — Vercel Cron сам начнёт дёргать `/api/cron` по расписанию.
+
+## Источники данных
+
+- Погода: <https://open-meteo.com/>
+- Качество воздуха: <https://open-meteo.com/en/docs/air-quality-api>
+- Новости (RSS): Lenta.ru, RIA.ru, RBC, Meduza
