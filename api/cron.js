@@ -5,7 +5,13 @@ const TIMEZONE = process.env.TIMEZONE || "auto";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const WORLD_NEWS_API_KEY = process.env.WORLD_NEWS_API_KEY;
+
+const NEWS_FEEDS = [
+  { name: "Lenta",  url: "https://lenta.ru/rss/news/world" },
+  { name: "RIA",    url: "https://ria.ru/export/rss2/world/index.xml" },
+  { name: "RBC",    url: "https://rssexport.rbc.ru/rbcnews/news/30/full.rss" },
+  { name: "Meduza", url: "https://meduza.io/rss/news" },
+];
 
 const NF_1 = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 1 });
 
@@ -131,110 +137,89 @@ async function getAirQuality(dayOffset = 0) {
   return { pm10Avg, pm10Max, pm25Avg, pm25Max };
 }
 
-async function translateTextsToRussian(texts) {
-  if (!Array.isArray(texts) || texts.length === 0) {
-    return texts;
+function decodeEntities(str) {
+  if (typeof str !== "string") return "";
+  return str
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTag(itemXml, tag) {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "i");
+  const match = itemXml.match(re);
+  return match ? decodeEntities(match[1]) : "";
+}
+
+function parseRssItems(xml) {
+  if (typeof xml !== "string") return [];
+  const items = [];
+  const itemRegex = /<item[\s\S]*?<\/item>/gi;
+  const matches = xml.match(itemRegex) || [];
+  for (const itemXml of matches) {
+    const title = extractTag(itemXml, "title");
+    const link = extractTag(itemXml, "link");
+    const pubDate = extractTag(itemXml, "pubDate");
+    if (!title || !link) continue;
+    const ts = Date.parse(pubDate);
+    items.push({
+      title,
+      url: link,
+      pubDate: Number.isFinite(ts) ? ts : 0,
+    });
   }
+  return items;
+}
 
-  const body = {
-    q: texts,
-    source: "en",
-    target: "ru",
-    format: "text",
-  };
-
+async function fetchFeed(feed) {
   try {
-    const res = await fetch("https://libretranslate.com/translate", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
+    const res = await fetch(feed.url, {
+      headers: { "user-agent": "Mozilla/5.0 (weather-cron RSS reader)" },
     });
-
     if (!res.ok) {
-      const errorText = await res.text();
-      console.error(
-        "LibreTranslate error:",
-        res.status,
-        res.statusText,
-        "-",
-        errorText.slice(0, 200)
-      );
-      return texts;
+      console.error(`RSS ${feed.name} HTTP ${res.status}`);
+      return [];
     }
-
-    const data = await res.json();
-    const translationsArray = Array.isArray(data) ? data : data.translations;
-    const translations = Array.isArray(translationsArray)
-      ? translationsArray
-      : [];
-
-    return texts.map((t, idx) => {
-      const translated =
-        translations[idx]?.translatedText || translations[idx]?.text;
-      return typeof translated === "string" && translated.trim()
-        ? translated
-        : t;
-    });
+    const xml = await res.text();
+    return parseRssItems(xml).map((it) => ({ ...it, source: feed.name }));
   } catch (error) {
     console.error(
-      "Failed to translate with LibreTranslate:",
+      `RSS ${feed.name} failed:`,
       error instanceof Error ? error.message : error
     );
-    return texts;
+    return [];
   }
 }
 
-async function getCyprusNews(limit = 3) {
-  if (!WORLD_NEWS_API_KEY) {
-    return null;
+async function getTopWorldNewsRu(limit = 5) {
+  const results = await Promise.all(NEWS_FEEDS.map(fetchFeed));
+  const all = results.flat();
+  if (!all.length) return null;
+
+  // sort by recency
+  all.sort((a, b) => b.pubDate - a.pubDate);
+
+  // dedupe by normalized title (first 60 chars)
+  const seen = new Set();
+  const picked = [];
+  for (const item of all) {
+    const key = item.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim().slice(0, 60);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    picked.push(item);
+    if (picked.length >= limit) break;
   }
 
-  const url = new URL("https://api.worldnewsapi.com/top-news");
-  url.searchParams.set("source-country", "cy");
-  url.searchParams.set("language", "en");
-  url.searchParams.set("api-key", WORLD_NEWS_API_KEY);
-
-  try {
-    const data = await fetchJson(url.toString());
-    const clusters = Array.isArray(data?.top_news) ? data.top_news : [];
-    const allNews = clusters.flatMap((cluster) =>
-      Array.isArray(cluster?.news) ? cluster.news : []
-    );
-
-    const unique = [];
-    const seenTitles = new Set();
-    for (const item of allNews) {
-      const title = typeof item?.title === "string" ? item.title.trim() : "";
-      if (!title || seenTitles.has(title)) continue;
-      seenTitles.add(title);
-      unique.push({
-        title,
-        url: typeof item?.url === "string" ? item.url : null,
-      });
-      if (unique.length >= limit) break;
-    }
-
-    if (!unique.length) {
-      return null;
-    }
-
-    const originalTitles = unique.map((item) => item.title);
-    const translatedTitles = await translateTextsToRussian(originalTitles);
-
-    translatedTitles.forEach((t, idx) => {
-      unique[idx].title = t;
-    });
-
-    return unique;
-  } catch (error) {
-    console.error(
-      "Failed to fetch Cyprus news:",
-      error instanceof Error ? error.message : error
-    );
-    return null;
-  }
+  return picked.length ? picked : null;
 }
 
 async function sendTelegramMessage(text) {
@@ -310,14 +295,15 @@ function buildMessage({ weather, air, news, isTomorrow }) {
 
   if (Array.isArray(news) && news.length > 0) {
     lines.push("");
-    lines.push("📰 Краткая новостная сводка по Кипру:");
+    lines.push("📰 Главные новости:");
     news.forEach((item, index) => {
       const title = item?.title;
       const url = item?.url;
+      const source = item?.source ? ` (${item.source})` : "";
       if (title && url) {
-        lines.push(`${index + 1}. ${title} — ${url}`);
+        lines.push(`${index + 1}. ${title}${source}\n${url}`);
       } else if (title) {
-        lines.push(`${index + 1}. ${title}`);
+        lines.push(`${index + 1}. ${title}${source}`);
       }
     });
   }
@@ -351,7 +337,7 @@ module.exports = async (req, res) => {
     const [weather, air, news] = await Promise.all([
       getWeather(dayOffset),
       getAirQuality(dayOffset),
-      getCyprusNews(),
+      getTopWorldNewsRu(5),
     ]);
     const message = buildMessage({
       weather,
